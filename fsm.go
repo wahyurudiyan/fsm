@@ -47,6 +47,9 @@ type FSM struct {
 	// callbacks maps events and targets to callback functions.
 	callbacks map[cKey]Callback
 
+	// message maps events and contain message by event.
+	message map[eKey]string
+
 	// transition is the internal transition functions used either directly
 	// or when Transition is called in an asynchronous state transition.
 	transition func()
@@ -60,6 +63,9 @@ type FSM struct {
 	// metadata can be used to store and load data that maybe used across events
 	// use methods SetMetadata() and Metadata() to store and load data
 	metadata map[string]interface{}
+
+	// eventMetadata is a metadata that belong to event
+	eventMetadata map[eKey]interface{}
 
 	metadataMu sync.RWMutex
 }
@@ -80,6 +86,12 @@ type EventDesc struct {
 	// Dst is the destination state that the FSM will be in if the transition
 	// succeds.
 	Dst string
+
+	// Msg is the message that provided to give information of the event
+	Msg string
+
+	// Metadata is will contain metadata that belong to event
+	Metadata map[string]interface{}
 }
 
 // Callback is a function type that callbacks should use. Event is the current
@@ -132,8 +144,10 @@ func NewFSM(initial string, events []EventDesc, callbacks map[string]Callback) *
 	f := &FSM{
 		transitionerObj: &transitionerStruct{},
 		current:         initial,
+		message:         make(map[eKey]string),
 		transitions:     make(map[eKey]string),
 		callbacks:       make(map[cKey]Callback),
+		eventMetadata:   make(map[eKey]interface{}),
 		metadata:        make(map[string]interface{}),
 	}
 
@@ -143,6 +157,8 @@ func NewFSM(initial string, events []EventDesc, callbacks map[string]Callback) *
 	for _, e := range events {
 		for _, src := range e.Src {
 			f.transitions[eKey{e.Name, src}] = e.Dst
+			f.message[eKey{e.Name, src}] = e.Msg
+			f.eventMetadata[eKey{e.Name, src}] = e.Metadata
 			allStates[src] = true
 			allStates[e.Dst] = true
 		}
@@ -287,7 +303,7 @@ func (f *FSM) SetMetadata(key string, dataValue interface{}) {
 //
 // The last error should never occur in this situation and is a sign of an
 // internal bug.
-func (f *FSM) Event(event string, args ...interface{}) error {
+func (f *FSM) Event(event string, args ...interface{}) (*Event, error) {
 	f.eventMu.Lock()
 	defer f.eventMu.Unlock()
 
@@ -295,29 +311,32 @@ func (f *FSM) Event(event string, args ...interface{}) error {
 	defer f.stateMu.RUnlock()
 
 	if f.transition != nil {
-		return InTransitionError{event}
+		return nil, InTransitionError{event}
 	}
 
 	dst, ok := f.transitions[eKey{event, f.current}]
 	if !ok {
 		for ekey := range f.transitions {
 			if ekey.event == event {
-				return InvalidEventError{event, f.current}
+				return nil, InvalidEventError{event, f.current}
 			}
 		}
-		return UnknownEventError{event}
+		return nil, UnknownEventError{event}
 	}
 
-	e := &Event{f, event, f.current, dst, nil, args, false, false}
+	msg := f.message[eKey{event, f.current}]
+	md := f.eventMetadata[eKey{event, f.current}].(map[string]interface{})
+
+	e := &Event{f, event, f.current, dst, nil, msg, md, args, false, false}
 
 	err := f.beforeEventCallbacks(e)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if f.current == dst {
 		f.afterEventCallbacks(e)
-		return NoTransitionError{e.Err}
+		return nil, NoTransitionError{e.Err}
 	}
 
 	// Setup the transition, call it later.
@@ -334,7 +353,7 @@ func (f *FSM) Event(event string, args ...interface{}) error {
 		if _, ok := err.(CanceledError); ok {
 			f.transition = nil
 		}
-		return err
+		return nil, err
 	}
 
 	// Perform the rest of the transition, if not asynchronous.
@@ -342,10 +361,10 @@ func (f *FSM) Event(event string, args ...interface{}) error {
 	defer f.stateMu.RLock()
 	err = f.doTransition()
 	if err != nil {
-		return InternalError{}
+		return nil, InternalError{}
 	}
 
-	return e.Err
+	return e, e.Err
 }
 
 // Transition wraps transitioner.transition.

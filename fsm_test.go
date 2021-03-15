@@ -55,7 +55,7 @@ func TestSetState(t *testing.T) {
 	if fsm.Current() != "start" {
 		t.Error("expected state to be 'walking'")
 	}
-	err := fsm.Event("walk")
+	_, err := fsm.Event("walk")
 	if err != nil {
 		t.Error("transition is expected no error")
 	}
@@ -70,7 +70,7 @@ func TestBadTransition(t *testing.T) {
 		Callbacks{},
 	)
 	fsm.transitionerObj = new(fakeTransitionerObj)
-	err := fsm.Event("run")
+	_, err := fsm.Event("run")
 	if err == nil {
 		t.Error("bad transition should give an error")
 	}
@@ -85,7 +85,7 @@ func TestInappropriateEvent(t *testing.T) {
 		},
 		Callbacks{},
 	)
-	err := fsm.Event("close")
+	_, err := fsm.Event("close")
 	if e, ok := err.(InvalidEventError); !ok && e.Event != "close" && e.State != "closed" {
 		t.Error("expected 'InvalidEventError' with correct state and event")
 	}
@@ -100,7 +100,7 @@ func TestInvalidEvent(t *testing.T) {
 		},
 		Callbacks{},
 	)
-	err := fsm.Event("lock")
+	_, err := fsm.Event("lock")
 	if e, ok := err.(UnknownEventError); !ok && e.Event != "close" {
 		t.Error("expected 'UnknownEventError' with correct event")
 	}
@@ -276,7 +276,7 @@ func TestBeforeEventWithoutTransition(t *testing.T) {
 		},
 	)
 
-	err := fsm.Event("dontrun")
+	_, err := fsm.Event("dontrun")
 	if e, ok := err.(NoTransitionError); !ok && e.Err != nil {
 		t.Error("expected 'NoTransitionError' without custom error")
 	}
@@ -373,7 +373,7 @@ func TestCancelWithError(t *testing.T) {
 			},
 		},
 	)
-	err := fsm.Event("run")
+	_, err := fsm.Event("run")
 	if _, ok := err.(CanceledError); !ok {
 		t.Error("expected only 'CanceledError'")
 	}
@@ -445,7 +445,7 @@ func TestAsyncTransitionInProgress(t *testing.T) {
 		},
 	)
 	fsm.Event("run")
-	err := fsm.Event("reset")
+	_, err := fsm.Event("reset")
 	if e, ok := err.(InTransitionError); !ok && e.Event != "reset" {
 		t.Error("expected 'InTransitionError' with correct state")
 	}
@@ -482,7 +482,7 @@ func TestCallbackNoError(t *testing.T) {
 			},
 		},
 	)
-	e := fsm.Event("run")
+	_, e := fsm.Event("run")
 	if e != nil {
 		t.Error("expected no error")
 	}
@@ -500,7 +500,7 @@ func TestCallbackError(t *testing.T) {
 			},
 		},
 	)
-	e := fsm.Event("run")
+	_, e := fsm.Event("run")
 	if e.Error() != "error" {
 		t.Error("expected error to be 'error'")
 	}
@@ -549,7 +549,7 @@ func TestCallbackPanic(t *testing.T) {
 			},
 		},
 	)
-	e := fsm.Event("run")
+	_, e := fsm.Event("run")
 	if e.Error() != "error" {
 		t.Error("expected error to be 'error'")
 	}
@@ -613,7 +613,7 @@ func TestDoubleTransition(t *testing.T) {
 					// calls to Event(...). It will then fail as an inappropriate transition as we
 					// have changed state.
 					go func() {
-						if err := fsm.Event("run", "second run"); err != nil {
+						if _, err := fsm.Event("run", "second run"); err != nil {
 							fmt.Println(err)
 							wg.Done() // It should fail, and then we unfreeze the test.
 						}
@@ -625,7 +625,7 @@ func TestDoubleTransition(t *testing.T) {
 			},
 		},
 	)
-	if err := fsm.Event("run"); err != nil {
+	if _, err := fsm.Event("run"); err != nil {
 		fmt.Println(err)
 	}
 	wg.Wait()
@@ -639,9 +639,89 @@ func TestNoTransition(t *testing.T) {
 		},
 		Callbacks{},
 	)
-	err := fsm.Event("run")
+	_, err := fsm.Event("run")
 	if _, ok := err.(NoTransitionError); !ok {
 		t.Error("expected 'NoTransitionError'")
+	}
+}
+
+func TestFSM_WithMessage(t *testing.T) {
+	fsm := NewFSM(
+		"stopped",
+		Events{
+			{Name: "start", Src: []string{"stopped"}, Dst: "started", Msg: "This code was started"},
+			{Name: "stop", Src: []string{"started"}, Dst: "stopped", Msg: "This code was stopped"},
+		},
+		Callbacks{},
+	)
+
+	evt, err := fsm.Event("start")
+	if err != nil {
+		t.Errorf("Unexpected error %s", err.Error())
+	}
+
+	if evt.Message == "" {
+		t.Errorf("Unexpected error %s", "message is empty")
+	}
+}
+
+func TestFSM_WithoutMessage(t *testing.T) {
+	fsm := NewFSM(
+		"stopped",
+		Events{
+			{Name: "start", Src: []string{"stopped"}, Dst: "started"},
+			{Name: "stop", Src: []string{"started"}, Dst: "stopped"},
+		},
+		Callbacks{},
+	)
+
+	evt, err := fsm.Event("start")
+	if err != nil {
+		t.Errorf("Unexpected error %s", err.Error())
+	}
+
+	if evt.Message != "" {
+		t.Errorf("Unexpected error %s", "message should be empty!")
+	}
+}
+
+func TestFSM_Metadata(t *testing.T) {
+	fsm := NewFSM(
+		"stopped",
+		Events{
+			{Name: "start", Src: []string{"stopped"}, Dst: "started", Metadata: map[string]interface{}{"test": "testing"}},
+			{Name: "stop", Src: []string{"started"}, Dst: "stopped", Metadata: map[string]interface{}{"test": "testing"}},
+		},
+		Callbacks{},
+	)
+
+	evt, err := fsm.Event("start")
+	if err != nil {
+		t.Errorf("Unexpected error %s", err.Error())
+	}
+
+	if evt.Metadata == nil {
+		t.Errorf("Unexpected error %s", "metadata is empty")
+	}
+}
+
+func TestFSM_MetadataIsNil(t *testing.T) {
+	fsm := NewFSM(
+		"stopped",
+		Events{
+			{Name: "start", Src: []string{"stopped"}, Dst: "started"},
+			{Name: "stop", Src: []string{"started"}, Dst: "stopped"},
+		},
+		Callbacks{},
+	)
+
+	evt, err := fsm.Event("start")
+	if err != nil {
+		t.Errorf("Unexpected error %s", err.Error())
+	}
+
+	if evt.Metadata != nil {
+		t.Errorf("Unexpected error %s", "metadata is empty")
 	}
 }
 
@@ -683,7 +763,7 @@ func ExampleNewFSM() {
 		},
 	)
 	fmt.Println(fsm.Current())
-	err := fsm.Event("warn")
+	_, err := fsm.Event("warn")
 	if err != nil {
 		fmt.Println(err)
 	}
@@ -790,12 +870,12 @@ func ExampleFSM_Event() {
 		Callbacks{},
 	)
 	fmt.Println(fsm.Current())
-	err := fsm.Event("open")
+	_, err := fsm.Event("open")
 	if err != nil {
 		fmt.Println(err)
 	}
 	fmt.Println(fsm.Current())
-	err = fsm.Event("close")
+	_, err = fsm.Event("close")
 	if err != nil {
 		fmt.Println(err)
 	}
@@ -819,7 +899,7 @@ func ExampleFSM_Transition() {
 			},
 		},
 	)
-	err := fsm.Event("open")
+	_, err := fsm.Event("open")
 	if e, ok := err.(AsyncError); !ok && e.Err != nil {
 		fmt.Println(err)
 	}
