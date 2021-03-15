@@ -681,7 +681,7 @@ func TestFSM_WithoutMessage(t *testing.T) {
 	}
 
 	if evt.Message != "" {
-		t.Errorf("Unexpected error %s", "message should be empty")
+		t.Errorf("Unexpected error %s", "message should be empty!")
 	}
 }
 
