@@ -31,6 +31,12 @@ type Event struct {
 	// Err is an optional error that can be returned from a callback.
 	Err error
 
+	// message is text field that contain information of the event.
+	Message string
+
+	// Metadata is event metadata that contain metadata defined by user.
+	Metadata map[string]interface{}
+
 	// Args is a optinal list of arguments passed to the callback.
 	Args []interface{}
 
